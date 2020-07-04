@@ -1,0 +1,7 @@
+runtime: nodejs10
+
+env_variables:
+    DB_USER: root
+    DB_PASS: test
+    DB_NAME: election
+    INSTANCE_CONNECTION_NAME: commanding-pipe-282223:us-central1:election-data

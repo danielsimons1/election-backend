@@ -1,0 +1,34 @@
+{
+  "name": "electiondata",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danielsimons1/election.git"
+  },
+  "author": "Daniel Simons",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/danielsimons1/election/issues"
+  },
+  "homepage": "https://github.com/danielsimons1/election#readme",
+  "dependencies": {
+    "@google-cloud/logging-winston": "^3.0.6",
+    "axios": "^0.19.2",
+    "body-parser": "^1.19.0",
+    "dotenv": "^8.2.0",
+    "express": "^4.17.1",
+    "http": "0.0.1-security",
+    "promise-mysql": "^4.1.3",
+    "pug": "^3.0.0",
+    "request": "^2.88.2",
+    "winston": "^3.3.3",
+    "xml-js": "^1.6.11",
+    "xml2js": "^0.4.23"
+  }
+}
