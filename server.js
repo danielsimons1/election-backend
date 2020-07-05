@@ -133,10 +133,11 @@ const ensureSchema = async (pool) => {
     `CREATE TABLE IF NOT EXISTS election.candidate
       ( candidate_id INT NOT NULL AUTO_INCREMENT,
         created_at timestamp NOT NULL,
+        shortname CHAR(45),
         firstname CHAR(45),
         lastname CHAR(45),
         gender CHAR(1),
-        age INT,
+        birthdate DATE,
         win_probability DOUBLE,
         PRIMARY KEY (candidate_id) );`
   );
@@ -169,54 +170,6 @@ app.use(async (req, res, next) => {
   }
 });
 
-
-app.get('/electiondata', (err, res) => {
-
-  axios.get('https://www.electionbettingodds.com/President2020_api')
-    .then((response) => {
-
-      const xmlString = response.data;
-
-      return xml2js.parseStringPromise(xmlString, {
-        attrkey: 'attributes',
-        explicitArray: false
-      });
-    }).then(async (result) => {
-
-      console.dir(result);
-
-      if (result && result.BettingData) {
-        console.log("Found data.......")
-
-        const data = formatBettingData(result);
-
-        const queryResults = await pool.query(`SELECT * from election.candidate;`);
-
-        res.status(200);
-        res.json({
-          data,
-          queryResults
-        });
-        res.end();
-      } else {
-        res.status(400);
-        res.json({
-          error: 400,
-          description: "Invalid response data: missing result key"
-        });
-        res.end();
-      }
-    }).catch(error => {
-      console.dir(error);
-      //logger.error(error);
-      res.status(400);
-      res.json({
-        error: 400
-      });
-      res.end();
-    });
-});
-
 const formatBettingData = (data) => {
   console.log("formatting betting data...");
   if (data.BettingData["attributes"]) {
@@ -226,6 +179,96 @@ const formatBettingData = (data) => {
 
   return data;
 };
+
+const candidatePredefinedData = [{
+    shortname: 'Trump',
+    firstname: 'Donald',
+    lastname: 'Trump',
+    gender: 'M',
+    birthdate: '06/14/1946'
+  },
+  {
+    shortname: 'Biden',
+    firstname: 'Joe',
+    lastname: 'Biden',
+    gender: 'M',
+    birthdate: '11/20/1942'
+  },
+  {
+    shortname: 'Harris',
+    firstname: 'Kamala',
+    lastname: 'Harris',
+    gender: 'F',
+    birthdate: '10/20/1964'
+  },
+  {
+    shortname: 'Yang',
+    firstname: 'Andrew',
+    lastname: 'Yang',
+    gender: 'M',
+    birthdate: '1/13/1975'
+  },
+  {
+    shortname: 'Warren',
+    firstname: 'Elizabeth',
+    lastname: 'Warren',
+    gender: 'F',
+    birthdate: '6/22/1949'
+  }
+];
+
+app.get('/massage-election-data', async (err, res) => {
+  try {
+    const queryResults = await pool.query(`SELECT * from election.candidate;`);
+
+    let filteredQueryResults = queryResults.filter(result => {
+      return candidatePredefinedData.find(predefinedData => {
+        return predefinedData.shortname == result.shortname;
+      });
+    });
+
+    return Promise.map(filteredQueryResults, async (result) => {
+      let predefinedData = candidatePredefinedData.find(data => {
+        return data.shortname == result.shortname;
+      });
+
+      let updateQueryString = `UPDATE election.candidate SET firstname = '${predefinedData.firstname}', lastname = '${predefinedData.lastname}', gender = '${predefinedData.gender}' where (shortname = '${result.shortname}' AND candidate_id <> 0);`
+
+      return await pool.query(updateQueryString);
+    }).then((result) => {
+      res.status(200);
+      res.json({
+        result
+      });
+      res.end();
+    });
+
+  } catch (error) {
+    res.status(400);
+    res.json({
+      error: 400
+    });
+    res.end();
+  }
+});
+
+app.get('/electiondata', async (err, res) => {
+
+  try {
+    const queryResults = await pool.query(`SELECT * from election.candidate;`);
+
+    res.status(200);
+    res.json(queryResults);
+    res.end();
+  } catch (error) {
+    res.status(400);
+    res.json({
+      error: 400
+    });
+    res.end();
+  }
+
+});
 
 app.get('/store-election-data', (err, res) => {
 
@@ -263,7 +306,7 @@ app.get('/store-election-data', (err, res) => {
         } else {
           console.log(key + ' ' + candidateData[key]);
 
-          let insertQueryString = `INSERT INTO election.candidate (created_at, lastname, win_probability) VALUES (now(), '${key}', '${parseFloat(candidateData[key])}')`;
+          let insertQueryString = `INSERT INTO election.candidate (created_at, shortname, win_probability) VALUES (now(), '${key}', '${parseFloat(candidateData[key])}')`;
           return await pool.query(insertQueryString);
         }
       });
