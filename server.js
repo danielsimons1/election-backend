@@ -2,6 +2,7 @@
 
 require('dotenv').config();
 
+const Promise = require('bluebird')
 const express = require('express');
 const app = express();
 const bodyParser = require('body-parser');
@@ -45,7 +46,6 @@ const createTcpPool = async (config) => {
   // Extract host and port from socket address
   const dbSocketAddr = process.env.DB_HOST.split(":")
   logger.info({
-    debug: true,
     user: process.env.DB_USER, // e.g. 'my-db-user'
     password: process.env.DB_PASS, // e.g. 'my-db-password'
     database: process.env.DB_DATABASE, // e.g. 'my-database'
@@ -57,7 +57,6 @@ const createTcpPool = async (config) => {
 
   // Establish a connection to the database
   return await mysql.createPool({
-    debug: true,
     user: process.env.DB_USER, // e.g. 'my-db-user'
     password: process.env.DB_PASS, // e.g. 'my-db-password'
     database: process.env.DB_DATABASE, // e.g. 'my-database'
@@ -74,7 +73,6 @@ const createUnixSocketPool = async (config) => {
 
   // Establish a connection to the database
   return await mysql.createPool({
-    debug: true,
     user: process.env.DB_USER, // e.g. 'my-db-user'
     password: process.env.DB_PASS, // e.g. 'my-db-password'
     database: process.env.DB_DATABASE, // e.g. 'my-database'
@@ -121,17 +119,23 @@ const createPool = async () => {
   } else {
     return await createUnixSocketPool(config);
   }
-    
+
 };
 // [END cloud_sql_mysql_mysql_create]
 
 const ensureSchema = async (pool) => {
-  // Wait for tables to be created (if they don't already exist).
-  await pool.query('USE election;');
-  await pool.query(
+  /// If the tables do not exist we create them on server startup
+  /// This is not a great long-term strategy
+  return await pool.query(
     `CREATE TABLE IF NOT EXISTS election.candidate
-      ( candidate_id SERIAL NOT NULL, created_at timestamp NOT NULL,
-      lastname CHAR(45) NOT NULL, PRIMARY KEY (candidate_id) );`
+      ( candidate_id INT NOT NULL AUTO_INCREMENT,
+        created_at timestamp NOT NULL,
+        firstname CHAR(45),
+        lastname CHAR(45),
+        gender CHAR(1),
+        age INT,
+        win_probability DOUBLE,
+        PRIMARY KEY (candidate_id) );`
   );
   console.log(`Ensured that table 'candidate' exists`);
 };
@@ -139,7 +143,6 @@ const ensureSchema = async (pool) => {
 let pool;
 const poolPromise = createPool()
   .then(async (pool) => {
-    console.log('we got the pool!')
     console.dir(pool);
     await ensureSchema(pool);
     return pool;
@@ -168,30 +171,96 @@ app.use(async (req, res, next) => {
 app.get('/electiondata', (err, res) => {
 
 	axios.get('https://www.electionbettingodds.com/President2020_api')
-	  .then(response => {
+	  .then((response) => {
+
 		const xmlString = response.data;
 
-		xml2js.parseString(xmlString, {attrkey: 'attributes', explicitArray: false}, (err, result) => {
-    		   if(err) {
-        	      throw err;
-    		   }
+		return xml2js.parseStringPromise(xmlString, {attrkey: 'attributes', explicitArray: false});
+  }).then(async (result) => {
 
-    		   // `result` is a JavaScript object
-    		   // convert it to a JSON string
-    		   const json = JSON.stringify(result);
+      console.dir(result);
 
-    		   // log JSON string
-    		   console.log(json);
-    		   
-		   res.status(200);
-		   res.json(result);
-		   res.end();
-		});
+      if (result && result.BettingData) {
+       console.log("Found data.......")
+
+       const data = formatBettingData(result);
+
+       const queryResults = await pool.query(`SELECT * from election.candidate;`);
+
+       res.status(200);
+       res.json({ data, queryResults });
+       res.end();
+      } else {
+       res.status(400);
+       res.json({ error: 400, description: "Invalid response data: missing result key"});
+       res.end();
+      }
 	  }).catch(error => {
+        console.dir(error);
+        //logger.error(error);
+		    res.status(400);
+		    res.json({error: 400});
+	      res.end();
+	  });
+});
+
+const formatBettingData = (data) => {
+  console.log("formatting betting data...");
+  if (data.BettingData["attributes"]) {
+    delete data.BettingData["attributes"];
+    delete data.BettingData["Time"];
+  }
+
+  return data;
+};
+
+app.get('/store-election-data', (err, res) => {
+
+	axios.get('https://www.electionbettingodds.com/President2020_api')
+	  .then((response) => {
+
+		const xmlString = response.data;
+
+		return xml2js.parseStringPromise(xmlString, {attrkey: 'attributes', explicitArray: false})
+  }).then(async (result) => {
+       if (!result || !result.BettingData) {
+         logger.error('Invalid response data: missing result key');
+         throw new Error("Invalid response data: missing result key");
+       }
+
+       const data = formatBettingData(result);
+       const candidateData = data.BettingData;
+
+		   const bettingDataKeys = Object.keys(candidateData);
+
+       const queryResults = await pool.query(`SELECT * from election.candidate;`);
+
+       return Promise.map(bettingDataKeys, async (key) => {
+         let foundRow = queryResults.find(queryResult => {
+           console.log(queryResult);
+           queryResult.lastName == key;
+         });
+
+         if (foundRow) {
+           let updateQueryString = `UPDATE election.candidate set (win_probability = ${parseFloat(candidateData[key])}) where lastname = '${key}'`;
+           return await pool.query(updateQueryString);
+         } else {
+           console.log(key + ' ' + candidateData[key]);
+
+           let insertQueryString = `INSERT INTO election.candidate (created_at, lastname, win_probability) VALUES (now(), '${key}', '${parseFloat(candidateData[key])}')`;
+           return await pool.query(insertQueryString);
+         }
+       });
+
+	  }).then(result => {
+      res.status(200);
+      res.json({success: 200})
+      res.end();
+    }).catch(error => {
         logger.error(error);
-		res.status(400);
-		res.json({error: 400});
-	    res.end();
+		    res.status(400);
+		    res.json({error: 400});
+	      res.end();
 	  });
 });
 
@@ -200,9 +269,9 @@ const port = process.env.PORT || 8080;
 
 server.listen(port, (err) => {
 	if (err) {
-        logger.error(err);
+    logger.error(err);
 		throw err;
 	}
 	/* eslint-disable no-console */
-	console.log('Node Endpoints working :)');
+	console.log('Node Endpoints working :) Yay!!!!');
 });
