@@ -11,7 +11,9 @@ const axios = require('axios');
 const xml2js = require('xml2js');
 const mysql = require('promise-mysql');
 const winston = require('winston');
-const {LoggingWinston} = require('@google-cloud/logging-winston');
+const {
+  LoggingWinston
+} = require('@google-cloud/logging-winston');
 const loggingWinston = new LoggingWinston();
 const logger = winston.createLogger({
   level: 'info',
@@ -29,7 +31,9 @@ app.set('view engine', 'pug');
 app.enable('trust proxy');
 
 // Automatically parse request body as form data.
-app.use(bodyParser.urlencoded({extended: false}));
+app.use(bodyParser.urlencoded({
+  extended: false
+}));
 app.use(bodyParser.json());
 
 // Set Content-Type for all responses for these routes.
@@ -119,7 +123,6 @@ const createPool = async () => {
   } else {
     return await createUnixSocketPool(config);
   }
-
 };
 // [END cloud_sql_mysql_mysql_create]
 
@@ -160,8 +163,7 @@ app.use(async (req, res, next) => {
   try {
     pool = await poolPromise;
     next();
-  }
-  catch (err) {
+  } catch (err) {
     logger.error(err);
     return next(err);
   }
@@ -170,38 +172,49 @@ app.use(async (req, res, next) => {
 
 app.get('/electiondata', (err, res) => {
 
-	axios.get('https://www.electionbettingodds.com/President2020_api')
-	  .then((response) => {
+  axios.get('https://www.electionbettingodds.com/President2020_api')
+    .then((response) => {
 
-		const xmlString = response.data;
+      const xmlString = response.data;
 
-		return xml2js.parseStringPromise(xmlString, {attrkey: 'attributes', explicitArray: false});
-  }).then(async (result) => {
+      return xml2js.parseStringPromise(xmlString, {
+        attrkey: 'attributes',
+        explicitArray: false
+      });
+    }).then(async (result) => {
 
       console.dir(result);
 
       if (result && result.BettingData) {
-       console.log("Found data.......")
+        console.log("Found data.......")
 
-       const data = formatBettingData(result);
+        const data = formatBettingData(result);
 
-       const queryResults = await pool.query(`SELECT * from election.candidate;`);
+        const queryResults = await pool.query(`SELECT * from election.candidate;`);
 
-       res.status(200);
-       res.json({ data, queryResults });
-       res.end();
+        res.status(200);
+        res.json({
+          data,
+          queryResults
+        });
+        res.end();
       } else {
-       res.status(400);
-       res.json({ error: 400, description: "Invalid response data: missing result key"});
-       res.end();
+        res.status(400);
+        res.json({
+          error: 400,
+          description: "Invalid response data: missing result key"
+        });
+        res.end();
       }
-	  }).catch(error => {
-        console.dir(error);
-        //logger.error(error);
-		    res.status(400);
-		    res.json({error: 400});
-	      res.end();
-	  });
+    }).catch(error => {
+      console.dir(error);
+      //logger.error(error);
+      res.status(400);
+      res.json({
+        error: 400
+      });
+      res.end();
+    });
 });
 
 const formatBettingData = (data) => {
@@ -216,62 +229,69 @@ const formatBettingData = (data) => {
 
 app.get('/store-election-data', (err, res) => {
 
-	axios.get('https://www.electionbettingodds.com/President2020_api')
-	  .then((response) => {
+  axios.get('https://www.electionbettingodds.com/President2020_api')
+    .then((response) => {
 
-		const xmlString = response.data;
+      const xmlString = response.data;
 
-		return xml2js.parseStringPromise(xmlString, {attrkey: 'attributes', explicitArray: false})
-  }).then(async (result) => {
-       if (!result || !result.BettingData) {
-         logger.error('Invalid response data: missing result key');
-         throw new Error("Invalid response data: missing result key");
-       }
+      return xml2js.parseStringPromise(xmlString, {
+        attrkey: 'attributes',
+        explicitArray: false
+      })
+    }).then(async (result) => {
+      if (!result || !result.BettingData) {
+        logger.error('Invalid response data: missing result key');
+        throw new Error("Invalid response data: missing result key");
+      }
 
-       const data = formatBettingData(result);
-       const candidateData = data.BettingData;
+      const data = formatBettingData(result);
+      const candidateData = data.BettingData;
 
-		   const bettingDataKeys = Object.keys(candidateData);
+      const bettingDataKeys = Object.keys(candidateData);
 
-       const queryResults = await pool.query(`SELECT * from election.candidate;`);
+      const queryResults = await pool.query(`SELECT * from election.candidate;`);
 
-       return Promise.map(bettingDataKeys, async (key) => {
-         let foundRow = queryResults.find(queryResult => {
-           console.log(queryResult);
-           queryResult.lastName == key;
-         });
+      return Promise.map(bettingDataKeys, async (key) => {
+        let foundRow = queryResults.find(queryResult => {
+          console.log(queryResult);
+          queryResult.lastName == key;
+        });
 
-         if (foundRow) {
-           let updateQueryString = `UPDATE election.candidate set (win_probability = ${parseFloat(candidateData[key])}) where lastname = '${key}'`;
-           return await pool.query(updateQueryString);
-         } else {
-           console.log(key + ' ' + candidateData[key]);
+        if (foundRow) {
+          let updateQueryString = `UPDATE election.candidate set (win_probability = ${parseFloat(candidateData[key])}) where lastname = '${key}'`;
+          return await pool.query(updateQueryString);
+        } else {
+          console.log(key + ' ' + candidateData[key]);
 
-           let insertQueryString = `INSERT INTO election.candidate (created_at, lastname, win_probability) VALUES (now(), '${key}', '${parseFloat(candidateData[key])}')`;
-           return await pool.query(insertQueryString);
-         }
-       });
+          let insertQueryString = `INSERT INTO election.candidate (created_at, lastname, win_probability) VALUES (now(), '${key}', '${parseFloat(candidateData[key])}')`;
+          return await pool.query(insertQueryString);
+        }
+      });
 
-	  }).then(result => {
+    }).then(result => {
       res.status(200);
-      res.json({success: 200})
+      res.json({
+        success: 200
+      })
       res.end();
     }).catch(error => {
-        logger.error(error);
-		    res.status(400);
-		    res.json({error: 400});
-	      res.end();
-	  });
+      logger.error(error);
+      res.status(400);
+      res.json({
+        error: 400
+      });
+      res.end();
+    });
 });
 
 // Listen to the App Engine-specified port, or 8080 otherwise
 const port = process.env.PORT || 8080;
 
 server.listen(port, (err) => {
-	if (err) {
+  if (err) {
     logger.error(err);
-		throw err;
-	}
-	/* eslint-disable no-console */
-	console.log('Node Endpoints working :) Yay!!!!');
+    throw err;
+  }
+  /* eslint-disable no-console */
+  console.log('Node Endpoints working :) Yay!!!!');
 });
