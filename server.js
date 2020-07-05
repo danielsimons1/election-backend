@@ -1,5 +1,7 @@
 'use strict';
 
+const cors = require('cors')
+
 require('dotenv').config();
 
 const Promise = require('bluebird')
@@ -19,6 +21,8 @@ const logger = winston.createLogger({
   level: 'info',
   transports: [new winston.transports.Console(), loggingWinston],
 });
+
+app.use(cors());
 
 console.dir({
   host: process.env.DB_HOST,
@@ -255,7 +259,7 @@ app.get('/massage-election-data', async (err, res) => {
 app.get('/electiondata', async (err, res) => {
 
   try {
-    const queryResults = await pool.query(`SELECT * from election.candidate;`);
+    const queryResults = await pool.query(`SELECT * from election.candidate ORDER BY win_probability DESC;`);
 
     res.status(200);
     res.json(queryResults);
